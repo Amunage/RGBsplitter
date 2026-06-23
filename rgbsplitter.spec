@@ -6,6 +6,10 @@ from pathlib import Path
 project_root = Path(SPECPATH).resolve()
 src_root = project_root / "src"
 resource_root = src_root / "rgbsplitter" / "resources"
+version_namespace = {}
+exec((src_root / "rgbsplitter" / "version.py").read_text(encoding="utf-8"), version_namespace)
+app_version = version_namespace["__version__"]
+exe_name = f"RGBsplitter-v{app_version}"
 
 
 a = Analysis(
@@ -31,7 +35,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="RGB Splitter",
+    name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

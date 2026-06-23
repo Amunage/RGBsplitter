@@ -221,6 +221,15 @@ function Write-UpdateLog($Message) {{
     Add-Content -LiteralPath $LogFile -Value ("[{{0}}] {{1}}" -f (Get-Date -Format o), $Message)
 }}
 
+function Start-UpdatedApp {{
+    $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
+    Remove-Item Env:_PYI_APPLICATION_HOME_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:_PYI_PARENT_PROCESS_LEVEL -ErrorAction SilentlyContinue
+    Remove-Item Env:_PYI_ARCHIVE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:_PYI_SPLASH_IPC -ErrorAction SilentlyContinue
+    Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
+}}
+
 try {{
     Write-UpdateLog ("Applying update. Target=" + $TargetExe)
     Wait-Process -Id $TargetPid -ErrorAction SilentlyContinue
@@ -233,7 +242,7 @@ try {{
         Move-Item -LiteralPath $TargetExe -Destination $BackupExe -Force
     }}
     Move-Item -LiteralPath $NewExe -Destination $TargetExe -Force
-    Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
+    Start-UpdatedApp
     Write-UpdateLog "Update applied successfully."
 
     if (Test-Path -LiteralPath $BackupExe) {{
@@ -251,7 +260,7 @@ try {{
     }}
     try {{
         if (Test-Path -LiteralPath $TargetExe) {{
-            Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
+            Start-UpdatedApp
         }}
     }} catch {{
         Write-UpdateLog ("Restart failed: " + $_.Exception.ToString())
@@ -274,6 +283,7 @@ def launch_update_script(script_path: Path) -> None:
         ],
         close_fds=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        env=_clean_pyinstaller_environment(),
     )
 
 
@@ -288,6 +298,15 @@ def _read_json_url(url: str, timeout: float) -> Mapping[str, Any]:
 
 def _powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _clean_pyinstaller_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    for key in list(environment):
+        if key.startswith("_PYI_"):
+            del environment[key]
+    return environment
 
 
 def _unlink_if_exists(path: Path) -> None:
