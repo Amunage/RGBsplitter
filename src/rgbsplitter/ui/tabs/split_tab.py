@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from ... import styles
-from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_items
-from ..controls import compact_combo_box
+from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_item_entries
+from ..controls import compact_combo_box, current_combo_value, set_combo_entries
 
 
 class SplitTab(QWidget):
@@ -21,7 +21,7 @@ class SplitTab(QWidget):
             row = QHBoxLayout()
 
             image_combo = compact_combo_box(QComboBox())
-            image_combo.addItems(split_items(self.image_paths))
+            set_combo_entries(image_combo, split_item_entries(self.image_paths))
 
             channel_combo = compact_combo_box(QComboBox())
             channel_combo.setFixedWidth(20)
@@ -70,17 +70,16 @@ class SplitTab(QWidget):
 
     def update_image_list(self, image_paths: list[ImageInput]) -> None:
         self.image_paths = image_paths
-        items = split_items(self.image_paths)
-        last_image_name = items[-1]
+        entries = split_item_entries(self.image_paths)
+        last_image_name = entries[-1][0]
 
         self.name_input.setText(last_image_name if self.image_paths else "")
 
         for channel in CHANNELS:
             combo_box = self.channel_widgets[(channel, "image")]
             if isinstance(combo_box, QComboBox):
-                combo_box.clear()
-                combo_box.addItems(items)
-                combo_box.setCurrentIndex(len(items) - 1 if self.image_paths else 0)
+                set_combo_entries(combo_box, entries)
+                combo_box.setCurrentIndex(len(entries) - 1 if self.image_paths else 0)
 
         self._update_image_size()
         self._set_export_enabled()
@@ -102,8 +101,8 @@ class SplitTab(QWidget):
                 continue
 
             selections[channel] = SplitSelection(
-                image_name=image_combo.currentText(),
-                source_channel=channel_combo.currentText(),
+                image_name=current_combo_value(image_combo),
+                source_channel=current_combo_value(channel_combo),
                 suffix=suffix_input.text().strip(),
             )
 

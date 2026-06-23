@@ -55,6 +55,10 @@ def image_display_name(image_path: ImageInput) -> str:
     return _source_path(image_path).stem
 
 
+def image_source_key(image_path: ImageInput) -> str:
+    return str(_source_path(image_path).resolve())
+
+
 def channel_items(image_paths: Iterable[ImageInput], include_special_items: bool = True) -> list[str]:
     items: list[str] = []
     if include_special_items:
@@ -64,8 +68,21 @@ def channel_items(image_paths: Iterable[ImageInput], include_special_items: bool
     return items
 
 
+def channel_item_entries(image_paths: Iterable[ImageInput], include_special_items: bool = True) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    if include_special_items:
+        entries.extend((item, item) for item in CHANNEL_ITEMS)
+        entries.append((SEPARATOR_ITEM, SEPARATOR_ITEM))
+    entries.extend((image_display_name(path), image_source_key(path)) for path in image_paths)
+    return entries
+
+
 def split_items(image_paths: Iterable[ImageInput]) -> list[str]:
     return [EMPTY_ITEM, *(image_display_name(path) for path in image_paths)]
+
+
+def split_item_entries(image_paths: Iterable[ImageInput]) -> list[tuple[str, str]]:
+    return [(EMPTY_ITEM, EMPTY_ITEM), *((image_display_name(path), image_source_key(path)) for path in image_paths)]
 
 
 def infer_size_from_last_image(image_paths: list[ImageInput], fallback: int = DEFAULT_IMAGE_SIZE) -> int:
@@ -283,7 +300,14 @@ def _find_image_source(image_paths: Iterable[ImageInput], image_name: str) -> Im
 
     for image_path in image_paths:
         path = _source_path(image_path)
-        if not path.name.startswith(image_name):
+        if image_name != image_source_key(image_path):
+            continue
+        if isinstance(image_path, CachedImage) or path.is_file():
+            return image_path
+
+    for image_path in image_paths:
+        path = _source_path(image_path)
+        if image_name not in {path.stem, path.name, str(path)}:
             continue
         if isinstance(image_path, CachedImage) or path.is_file():
             return image_path

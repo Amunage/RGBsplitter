@@ -26,8 +26,11 @@ htmlcov/
 .tox/
 .nox/
 .cache/
+
+# development and project files
 scripts/
 tests/
+docs/
 
 # PyInstaller outputs
 *.manifest

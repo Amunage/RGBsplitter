@@ -7,7 +7,7 @@ from PIL import Image
 from PIL.ImageQt import toqimage
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFont, QPainter, QPixmap
-from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import styles
 from ..core.image_ops import CachedImage, image_display_name, load_cached_image
@@ -58,19 +58,26 @@ class PreviewArea(QWidget):
         self.pin_preview_checkbox.setStyleSheet(styles.CHECKBOX)
         self.pin_preview_checkbox.toggled.connect(self._handle_pin_preview_toggled)
 
-        self.reset_button = QPushButton("Reset")
-        self.reset_button.setFixedWidth(80)
-        self.reset_button.clicked.connect(self.reset_image_list)
-        self.reset_button.setStyleSheet(styles.BUTTON)
-
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.setFixedWidth(80)
-        self.refresh_button.clicked.connect(self.refresh_image_list)
-        self.refresh_button.setStyleSheet(styles.BUTTON)
+        self.remove_button = styles.create_icon_button(
+            "remove",
+            "Remove selected image",
+            self.remove_current_image,
+        )
+        self.refresh_button = styles.create_icon_button(
+            "refresh",
+            "Refresh images",
+            self.refresh_image_list,
+        )
+        self.reset_button = styles.create_icon_button(
+            "reset",
+            "Reset image list",
+            self.reset_image_list,
+        )
 
         sub_layout = QHBoxLayout()
         sub_layout.addWidget(self.pin_preview_checkbox)
         sub_layout.addWidget(self.combo_box)
+        sub_layout.addWidget(self.remove_button)
         sub_layout.addWidget(self.refresh_button)
         sub_layout.addWidget(self.reset_button)
 
@@ -220,6 +227,19 @@ class PreviewArea(QWidget):
             preview.show()
         self.image_list_updated.emit(self.image_paths.copy())
 
+    def remove_current_image(self) -> None:
+        current_index = self.combo_box.currentIndex()
+        if current_index < 0 or current_index >= len(self.image_paths):
+            return
+
+        del self.image_paths[current_index]
+        next_index = min(current_index, len(self.image_paths) - 1)
+        self.image_list_updated.emit(self.image_paths.copy())
+        self._update_combo_box_items(next_index if next_index >= 0 else None)
+
+        if self.pin_preview_checkbox.isChecked():
+            self.show_hover_preview()
+
     def refresh_image_list(self) -> None:
         current_index = self.combo_box.currentIndex()
         current_path = self.image_paths[current_index].path if 0 <= current_index < len(self.image_paths) else None
@@ -232,15 +252,11 @@ class PreviewArea(QWidget):
 
         self.image_paths = refreshed_images
         self.image_list_updated.emit(self.image_paths.copy())
-        self._update_combo_box_items()
+        current_paths = [cached_image.path for cached_image in self.image_paths]
+        selected_index = current_paths.index(current_path) if current_path in current_paths else None
+        self._update_combo_box_items(selected_index)
         if self.pin_preview_checkbox.isChecked():
             self.show_hover_preview()
-
-        current_paths = [cached_image.path for cached_image in self.image_paths]
-        if current_path in current_paths:
-            current_index = current_paths.index(current_path)
-            self.combo_box.setCurrentIndex(current_index)
-            self.update_previews(current_index)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -249,15 +265,15 @@ class PreviewArea(QWidget):
         else:
             self.update_previews(self.combo_box.currentIndex())
 
-    def _update_combo_box_items(self) -> None:
+    def _update_combo_box_items(self, selected_index: int | None = None) -> None:
         self.combo_box.clear()
         items = [image_display_name(image_path) for image_path in self.image_paths]
         self.combo_box.addItems(items)
 
         if items:
-            last_index = len(items) - 1
-            self.combo_box.setCurrentIndex(last_index)
-            self.update_previews(last_index)
+            index = len(items) - 1 if selected_index is None else max(0, min(selected_index, len(items) - 1))
+            self.combo_box.setCurrentIndex(index)
+            self.update_previews(index)
         else:
             self._clear_channel_previews()
 

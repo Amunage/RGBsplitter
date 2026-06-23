@@ -8,12 +8,12 @@ from ...core.image_ops import (
     ImageInput,
     MixSelection,
     build_mix_image,
-    channel_items,
+    channel_item_entries,
     infer_size_from_last_image,
     resolve_output_size,
     save_mix_image,
 )
-from ..controls import compact_combo_box
+from ..controls import compact_combo_box, current_combo_value, set_combo_entries
 
 
 class MixTab(QWidget):
@@ -38,7 +38,7 @@ class MixTab(QWidget):
             channel_label.setStyleSheet(styles.LABEL)
 
             image_combo = compact_combo_box(QComboBox())
-            image_combo.addItems(channel_items(self.image_paths))
+            set_combo_entries(image_combo, channel_item_entries(self.image_paths))
             image_combo.currentIndexChanged.connect(lambda *_: self.preview_changed.emit())
 
             channel_combo = compact_combo_box(QComboBox())
@@ -85,16 +85,15 @@ class MixTab(QWidget):
 
     def update_image_list(self, image_paths: list[ImageInput]) -> None:
         self.image_paths = image_paths
-        items = channel_items(self.image_paths)
-        last_image_name = items[-1]
+        entries = channel_item_entries(self.image_paths)
+        last_image_name = entries[-1][0]
 
         self.name_input.setText(f"{last_image_name}_mix" if self.image_paths else "")
 
         for channel in CHANNELS:
             combo_box = self.channel_widgets[(channel, "image")]
-            combo_box.clear()
-            combo_box.addItems(items)
-            combo_box.setCurrentIndex(len(items) - 1 if self.image_paths else 0)
+            set_combo_entries(combo_box, entries)
+            combo_box.setCurrentIndex(len(entries) - 1 if self.image_paths else 0)
 
         self._update_image_size()
         self._set_export_enabled()
@@ -122,8 +121,8 @@ class MixTab(QWidget):
     def current_selections(self) -> dict[str, MixSelection]:
         return {
             channel: MixSelection(
-                image_name=self.channel_widgets[(channel, "image")].currentText(),
-                source_channel=self.channel_widgets[(channel, "channel")].currentText(),
+                image_name=current_combo_value(self.channel_widgets[(channel, "image")]),
+                source_channel=current_combo_value(self.channel_widgets[(channel, "channel")]),
             )
             for channel in CHANNELS
         }
