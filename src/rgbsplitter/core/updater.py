@@ -218,10 +218,11 @@ function Write-UpdateLog($Message) {{
     if (-not (Test-Path -LiteralPath $dir)) {{
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }}
-    Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format o), $Message)
+    Add-Content -LiteralPath $LogFile -Value ("[{{0}}] {{1}}" -f (Get-Date -Format o), $Message)
 }}
 
 try {{
+    Write-UpdateLog ("Applying update. Target=" + $TargetExe)
     Wait-Process -Id $TargetPid -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 300
 
@@ -232,7 +233,8 @@ try {{
         Move-Item -LiteralPath $TargetExe -Destination $BackupExe -Force
     }}
     Move-Item -LiteralPath $NewExe -Destination $TargetExe -Force
-    Start-Process -FilePath $TargetExe
+    Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
+    Write-UpdateLog "Update applied successfully."
 
     if (Test-Path -LiteralPath $BackupExe) {{
         Remove-Item -LiteralPath $BackupExe -Force -ErrorAction SilentlyContinue
@@ -249,14 +251,14 @@ try {{
     }}
     try {{
         if (Test-Path -LiteralPath $TargetExe) {{
-            Start-Process -FilePath $TargetExe
+            Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
         }}
     }} catch {{
         Write-UpdateLog ("Restart failed: " + $_.Exception.ToString())
     }}
 }}
 """
-    script_path.write_text(script, encoding="utf-8")
+    script_path.write_text(script, encoding="utf-8-sig")
     return script_path
 
 
