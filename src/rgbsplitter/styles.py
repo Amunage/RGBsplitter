@@ -122,4 +122,11 @@ QPushButton:disabled {
 }
 """
 
+CHECKBOX = """
+QCheckBox {
+    color: #c8c8c8;
+    spacing: 4px;
+}
+"""
+
 LABEL = "color: #c8c8c8"

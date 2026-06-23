@@ -11,6 +11,7 @@ CHANNEL_ITEMS = ("None", "White", "Black", "Gray")
 SEPARATOR_ITEM = "-" * 40
 EMPTY_ITEM = "-"
 DEFAULT_IMAGE_SIZE = 4096
+ImageSize = int | tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -31,11 +32,30 @@ class SplitSelection:
     suffix: str = ""
 
 
-def image_display_name(image_path: str | Path) -> str:
-    return Path(image_path).stem
+@dataclass(frozen=True)
+class CachedImage:
+    path: Path
+    image: Image.Image
 
 
-def channel_items(image_paths: Iterable[str | Path], include_special_items: bool = True) -> list[str]:
+ImageInput = str | Path | CachedImage
+
+
+def load_cached_image(image_path: str | Path) -> CachedImage | None:
+    path = Path(image_path)
+    try:
+        with Image.open(path) as image:
+            return CachedImage(path=path, image=image.copy())
+    except OSError as error:
+        print(f"[WARN] Could not load image into cache: {path} ({error})")
+        return None
+
+
+def image_display_name(image_path: ImageInput) -> str:
+    return _source_path(image_path).stem
+
+
+def channel_items(image_paths: Iterable[ImageInput], include_special_items: bool = True) -> list[str]:
     items: list[str] = []
     if include_special_items:
         items.extend(CHANNEL_ITEMS)
@@ -44,22 +64,23 @@ def channel_items(image_paths: Iterable[str | Path], include_special_items: bool
     return items
 
 
-def split_items(image_paths: Iterable[str | Path]) -> list[str]:
+def split_items(image_paths: Iterable[ImageInput]) -> list[str]:
     return [EMPTY_ITEM, *(image_display_name(path) for path in image_paths)]
 
 
-def infer_size_from_last_image(image_paths: list[str | Path], fallback: int = DEFAULT_IMAGE_SIZE) -> int:
-    if not image_paths:
-        return fallback
+def infer_size_from_last_image(image_paths: list[ImageInput], fallback: int = DEFAULT_IMAGE_SIZE) -> int:
+    for image_path in reversed(image_paths):
+        image = _copy_source_image(image_path)
+        if image is not None:
+            return image.width
 
-    with Image.open(image_paths[-1]) as image:
-        return image.width
+    return fallback
 
 
 def save_mix_image(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selections: Mapping[str, MixSelection],
-    image_size: int,
+    image_size: ImageSize,
     output_name: str,
     file_format: str,
 ) -> Path:
@@ -70,11 +91,11 @@ def save_mix_image(
 
 
 def build_mix_image(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selections: Mapping[str, MixSelection],
-    image_size: int,
+    image_size: ImageSize,
 ) -> Image.Image:
-    size = (image_size, image_size)
+    size = _normalize_image_size(image_size)
     channels = []
 
     for target_channel in CHANNELS:
@@ -88,9 +109,9 @@ def build_mix_image(
 
 
 def save_merge_image(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selections: Mapping[str, MergeSelection],
-    image_size: int,
+    image_size: ImageSize,
     output_name: str,
     file_format: str,
 ) -> Path:
@@ -101,11 +122,11 @@ def save_merge_image(
 
 
 def build_merge_image(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selections: Mapping[str, MergeSelection],
-    image_size: int,
+    image_size: ImageSize,
 ) -> Image.Image:
-    size = (image_size, image_size)
+    size = _normalize_image_size(image_size)
     channels = []
 
     for target_channel in CHANNELS:
@@ -119,35 +140,61 @@ def build_merge_image(
 
 
 def save_split_images(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selections: Mapping[str, SplitSelection],
-    image_size: int,
+    image_size: ImageSize,
     output_name: str,
     file_format: str,
+    keep_aspect_ratio: bool = False,
 ) -> list[Path]:
     base_name = output_name or "Blend_Split"
-    size = (image_size, image_size)
+    size = _normalize_image_size(image_size)
     saved_paths: list[Path] = []
 
     for selection in selections.values():
-        source_path = _find_image_path(image_paths, selection.image_name)
-        if source_path is None:
+        source = _find_image_source(image_paths, selection.image_name)
+        if source is None:
             continue
 
-        with Image.open(source_path) as image:
-            channel_image = dict(zip(CHANNELS, image.convert("RGBA").split(), strict=True))[selection.source_channel]
-            resized = channel_image.convert("RGB").resize(size)
+        output_size = _size_for_source(source, size[0]) if keep_aspect_ratio else size
+
+        image = _copy_source_image(source)
+        if image is None:
+            continue
+        channel_image = dict(zip(CHANNELS, image.convert("RGBA").split(), strict=True))[selection.source_channel]
+        resized = channel_image.convert("RGB").resize(output_size)
 
         suffix = selection.suffix or selection.source_channel
-        output_path = Path(source_path).parent / f"{base_name}_{suffix}.{file_format}"
+        output_path = _source_path(source).parent / f"{base_name}_{suffix}.{file_format}"
         resized.save(output_path)
         saved_paths.append(output_path)
 
     return saved_paths
 
 
+def resolve_output_size(
+    image_paths: list[ImageInput],
+    selected_size: int,
+    keep_aspect_ratio: bool,
+    preferred_image_names: Iterable[str] = (),
+) -> tuple[int, int]:
+    target_width = max(1, int(selected_size))
+    square_size = (target_width, target_width)
+
+    if not keep_aspect_ratio:
+        return square_size
+
+    source = _find_first_image_source(image_paths, preferred_image_names)
+    if source is None and image_paths:
+        source = image_paths[-1]
+    if source is None:
+        return square_size
+
+    return _size_for_source(source, target_width)
+
+
 def _resolve_mix_channel(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selection: MixSelection,
     target_channel: str,
     size: tuple[int, int],
@@ -161,17 +208,19 @@ def _resolve_mix_channel(
     if selection.image_name == "None":
         return _constant_channel(size, 255)
 
-    source_path = _find_image_path(image_paths, selection.image_name)
-    if source_path is None:
+    source = _find_image_source(image_paths, selection.image_name)
+    if source is None:
         return _constant_channel(size, 255)
 
-    with Image.open(source_path) as image:
-        source_channels = dict(zip(CHANNELS, image.convert("RGBA").split(), strict=True))
-        return source_channels[selection.source_channel].convert("L").resize(size)
+    image = _copy_source_image(source)
+    if image is None:
+        return _constant_channel(size, 255)
+    source_channels = dict(zip(CHANNELS, image.convert("RGBA").split(), strict=True))
+    return source_channels[selection.source_channel].convert("L").resize(size)
 
 
 def _resolve_merge_channel(
-    image_paths: list[str | Path],
+    image_paths: list[ImageInput],
     selection: MergeSelection,
     target_channel: str,
     size: tuple[int, int],
@@ -185,31 +234,81 @@ def _resolve_merge_channel(
     if selection.image_name == "None":
         return _constant_channel(size, 255)
 
-    source_path = _find_image_path(image_paths, selection.image_name)
-    if source_path is None:
+    source = _find_image_source(image_paths, selection.image_name)
+    if source is None:
         return _constant_channel(size, 255)
 
-    with Image.open(source_path) as image:
-        return image.convert("L").resize(size)
+    image = _copy_source_image(source)
+    if image is None:
+        return _constant_channel(size, 255)
+    return image.convert("L").resize(size)
 
 
 def _constant_channel(size: tuple[int, int], value: int) -> Image.Image:
     return Image.new("L", size, value)
 
 
-def _find_image_path(image_paths: Iterable[str | Path], image_name: str) -> Path | None:
-    if image_name in {"", "None", "White", "Black", "Gray", SEPARATOR_ITEM, EMPTY_ITEM}:
-        return None
+def _normalize_image_size(image_size: ImageSize) -> tuple[int, int]:
+    if isinstance(image_size, int):
+        return (max(1, image_size), max(1, image_size))
 
-    for image_path in image_paths:
-        path = Path(image_path)
-        if path.name.startswith(image_name):
-            return path
+    width, height = image_size
+    return (max(1, int(width)), max(1, int(height)))
+
+
+def _size_for_source(source: ImageInput, target_width: int) -> tuple[int, int]:
+    image = _copy_source_image(source)
+    if image is None:
+        return (target_width, target_width)
+
+    source_width, source_height = image.size
+    if source_width <= 0 or source_height <= 0:
+        return (target_width, target_width)
+
+    return (target_width, max(1, round(target_width * source_height / source_width)))
+
+
+def _find_first_image_source(image_paths: Iterable[ImageInput], image_names: Iterable[str]) -> ImageInput | None:
+    for image_name in image_names:
+        source = _find_image_source(image_paths, image_name)
+        if source is not None:
+            return source
 
     return None
 
 
-def _output_path(image_paths: list[str | Path], output_name: str, file_format: str) -> Path:
+def _find_image_source(image_paths: Iterable[ImageInput], image_name: str) -> ImageInput | None:
+    if image_name in {"", "None", "White", "Black", "Gray", SEPARATOR_ITEM, EMPTY_ITEM}:
+        return None
+
+    for image_path in image_paths:
+        path = _source_path(image_path)
+        if not path.name.startswith(image_name):
+            continue
+        if isinstance(image_path, CachedImage) or path.is_file():
+            return image_path
+
+    return None
+
+
+def _copy_source_image(source: ImageInput) -> Image.Image | None:
+    if isinstance(source, CachedImage):
+        return source.image.copy()
+
+    try:
+        with Image.open(source) as image:
+            return image.copy()
+    except OSError:
+        return None
+
+
+def _source_path(source: ImageInput) -> Path:
+    if isinstance(source, CachedImage):
+        return source.path
+    return Path(source)
+
+
+def _output_path(image_paths: list[ImageInput], output_name: str, file_format: str) -> Path:
     if not image_paths:
         raise ValueError("At least one image is required before exporting.")
-    return Path(image_paths[0]).parent / f"{output_name}.{file_format}"
+    return _source_path(image_paths[0]).parent / f"{output_name}.{file_format}"

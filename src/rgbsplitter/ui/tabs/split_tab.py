@@ -1,12 +1,12 @@
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from ... import styles
-from ...core.image_ops import CHANNELS, SplitSelection, infer_size_from_last_image, save_split_images, split_items
+from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_items
 from ..controls import compact_combo_box
 
 
 class SplitTab(QWidget):
-    def __init__(self, image_paths: list[str] | None = None, parent: QWidget | None = None) -> None:
+    def __init__(self, image_paths: list[ImageInput] | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.image_paths = image_paths or []
         self.channel_widgets: dict[tuple[str, str], QComboBox | QLineEdit] = {}
@@ -48,6 +48,10 @@ class SplitTab(QWidget):
         layout.addWidget(self.name_input)
 
         export_layout = QHBoxLayout()
+        self.keep_ratio_checkbox = QCheckBox("Keep Ratio")
+        self.keep_ratio_checkbox.setStyleSheet(styles.CHECKBOX)
+        export_layout.addWidget(self.keep_ratio_checkbox)
+
         self.image_size_combo_box = compact_combo_box(QComboBox())
         self.image_size_combo_box.addItems(["128", "256", "512", "1024", "2048", "4096"])
         self.image_size_combo_box.setCurrentText("4096")
@@ -64,7 +68,7 @@ class SplitTab(QWidget):
 
         layout.addLayout(export_layout)
 
-    def update_image_list(self, image_paths: list[str]) -> None:
+    def update_image_list(self, image_paths: list[ImageInput]) -> None:
         self.image_paths = image_paths
         items = split_items(self.image_paths)
         last_image_name = items[-1]
@@ -109,6 +113,7 @@ class SplitTab(QWidget):
             image_size=int(self.image_size_combo_box.currentText()),
             output_name=self.name_input.text().strip(),
             file_format=self.file_format_combo_box.currentText(),
+            keep_aspect_ratio=self.keep_ratio_checkbox.isChecked(),
         )
 
         for output_path in output_paths:
