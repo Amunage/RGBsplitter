@@ -5,7 +5,7 @@ from typing import Callable
 
 from PIL import Image
 from PIL.ImageQt import toqimage
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -26,6 +26,7 @@ class PreviewArea(QWidget):
         self._hover_preview_image: Image.Image | None = None
         self._is_hover_preview_visible = False
         self._is_pointer_in_image_area = False
+        self._settings = QSettings()
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -56,6 +57,7 @@ class PreviewArea(QWidget):
         self.pin_preview_checkbox.setFixedWidth(20)
         self.pin_preview_checkbox.setToolTip("Pin assembled preview")
         self.pin_preview_checkbox.setStyleSheet(styles.CHECKBOX)
+        self.pin_preview_checkbox.setChecked(self._settings_bool("preview/pin_assembled", False))
         self.pin_preview_checkbox.toggled.connect(self._handle_pin_preview_toggled)
 
         self.remove_button = styles.create_icon_button(
@@ -314,9 +316,18 @@ class PreviewArea(QWidget):
         return any(cached_image.path == path for cached_image in self.image_paths)
 
     def _handle_pin_preview_toggled(self, checked: bool) -> None:
+        self._settings.setValue("preview/pin_assembled", checked)
         if checked:
             self.show_hover_preview()
             return
 
         if not self._is_pointer_in_image_area:
             self.clear_hover_preview()
+
+    def _settings_bool(self, key: str, default: bool) -> bool:
+        value = self._settings.value(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in {"1", "true", "yes", "on"}
+        return bool(value)

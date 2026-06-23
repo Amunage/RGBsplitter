@@ -17,6 +17,8 @@ def apply_dark_palette(app: QApplication) -> None:
 
 def main() -> int:
     app = QApplication(sys.argv)
+    app.setOrganizationName("Amunage")
+    app.setApplicationName("RGBsplitter")
     apply_dark_palette(app)
 
     main_window = MainWindow()

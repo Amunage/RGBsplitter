@@ -1,8 +1,9 @@
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ... import styles
 from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_item_entries
 from ..controls import compact_combo_box, current_combo_value, set_combo_entries
+from ..export_controls import ExportControls
 
 
 class SplitTab(QWidget):
@@ -47,26 +48,9 @@ class SplitTab(QWidget):
         self.name_input.setStyleSheet(styles.LINE_EDIT)
         layout.addWidget(self.name_input)
 
-        export_layout = QHBoxLayout()
-        self.keep_ratio_checkbox = QCheckBox("Keep Ratio")
-        self.keep_ratio_checkbox.setStyleSheet(styles.CHECKBOX)
-        export_layout.addWidget(self.keep_ratio_checkbox)
-
-        self.image_size_combo_box = compact_combo_box(QComboBox())
-        self.image_size_combo_box.addItems(["128", "256", "512", "1024", "2048", "4096"])
-        self.image_size_combo_box.setCurrentText("4096")
-        export_layout.addWidget(self.image_size_combo_box)
-
-        self.file_format_combo_box = compact_combo_box(QComboBox())
-        self.file_format_combo_box.addItems(["tga", "png"])
-        export_layout.addWidget(self.file_format_combo_box)
-
-        self.export_button = QPushButton("Export")
-        self.export_button.clicked.connect(self.export_image)
-        self.export_button.setStyleSheet(styles.BUTTON)
-        export_layout.addWidget(self.export_button)
-
-        layout.addLayout(export_layout)
+        self.export_controls = ExportControls("split")
+        self.export_controls.export_requested.connect(self.export_image)
+        layout.addWidget(self.export_controls)
 
     def update_image_list(self, image_paths: list[ImageInput]) -> None:
         self.image_paths = image_paths
@@ -109,10 +93,10 @@ class SplitTab(QWidget):
         output_paths = save_split_images(
             image_paths=self.image_paths,
             selections=selections,
-            image_size=int(self.image_size_combo_box.currentText()),
+            image_size=self.export_controls.selected_size,
             output_name=self.name_input.text().strip(),
-            file_format=self.file_format_combo_box.currentText(),
-            keep_aspect_ratio=self.keep_ratio_checkbox.isChecked(),
+            file_format=self.export_controls.file_format,
+            keep_aspect_ratio=self.export_controls.keep_aspect_ratio,
         )
 
         for output_path in output_paths:
@@ -120,9 +104,7 @@ class SplitTab(QWidget):
 
     def _update_image_size(self) -> None:
         size = str(infer_size_from_last_image(self.image_paths))
-        index = self.image_size_combo_box.findText(size)
-        if index >= 0:
-            self.image_size_combo_box.setCurrentIndex(index)
+        self.export_controls.set_inferred_size(int(size))
 
     def _set_export_enabled(self) -> None:
-        self.export_button.setEnabled(bool(self.image_paths))
+        self.export_controls.set_export_enabled(bool(self.image_paths))
