@@ -28,7 +28,8 @@ htmlcov/
 .cache/
 
 # development and project files
-scripts/
+scripts/*
+!scripts/build.bat
 tests/
 docs/
 

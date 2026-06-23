@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-project_root = Path.cwd()
+project_root = Path(SPECPATH).resolve()
 src_root = project_root / "src"
 resource_root = src_root / "rgbsplitter" / "resources"
 
