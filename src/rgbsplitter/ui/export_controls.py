@@ -3,8 +3,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
-    QLabel,
-    QProgressBar,
     QPushButton,
     QWidget,
 )
@@ -19,6 +17,7 @@ FILE_FORMAT_ITEMS = ["tga", "png"]
 class ExportControls(QWidget):
     changed = Signal()
     export_requested = Signal()
+    busy_changed = Signal(bool, str)
 
     def __init__(self, settings_group: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -47,13 +46,11 @@ class ExportControls(QWidget):
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
-        self.progress_bar.setVisible(busy)
-        self.set_status(message)
+        self.busy_changed.emit(busy, message)
         self._apply_enabled_state()
 
     def set_status(self, message: str = "") -> None:
-        self.status_label.setText(message)
-        self.status_label.setVisible(bool(message))
+        pass
 
     def set_inferred_size(self, image_size: int) -> None:
         if self._has_saved_size:
@@ -85,20 +82,6 @@ class ExportControls(QWidget):
         self.export_button = QPushButton("Export")
         self.export_button.setStyleSheet(styles.BUTTON)
         layout.addWidget(self.export_button)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedWidth(54)
-        self.progress_bar.setStyleSheet(styles.PROGRESS_BAR)
-        self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
-
-        self.status_label = QLabel()
-        self.status_label.setFixedWidth(58)
-        self.status_label.setStyleSheet(styles.LABEL)
-        self.status_label.hide()
-        layout.addWidget(self.status_label)
 
         self.keep_ratio_checkbox.toggled.connect(self._save_keep_ratio)
         self.keep_ratio_checkbox.toggled.connect(lambda *_: self.changed.emit())

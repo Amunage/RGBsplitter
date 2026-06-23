@@ -7,7 +7,18 @@ from pathlib import Path
 from PIL import Image
 from PIL.ImageQt import toqimage
 from PySide6.QtCore import QEvent, QObject, QSettings, QThreadPool, Qt, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFont, QPainter, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import styles
@@ -169,16 +180,7 @@ class PreviewArea(QWidget):
 
             painter = QPainter(labeled_pixmap)
             painter.drawPixmap(0, 0, scaled_pixmap)
-            painter.setPen(QColor(50, 50, 50))
-            painter.setFont(QFont("Arial", 10))
-
-            text_rect = labeled_pixmap.rect()
-            text_rect.setBottom(text_rect.bottom() - 5)
-            painter.drawText(
-                text_rect,
-                Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-                labels[channel_index],
-            )
+            self._draw_channel_label(painter, labeled_pixmap, labels[channel_index])
             painter.end()
 
             self.previews[channel_index].setPixmap(labeled_pixmap)
@@ -346,6 +348,24 @@ class PreviewArea(QWidget):
         for preview in self.previews:
             preview.clear()
             preview.show()
+
+    def _draw_channel_label(self, painter: QPainter, pixmap: QPixmap, label: str) -> None:
+        font = QFont("Arial", 12)
+        metrics = QFontMetrics(font)
+        text_rect = pixmap.rect()
+        text_rect.setBottom(text_rect.bottom() - 5)
+
+        path = QPainterPath()
+        text_width = metrics.horizontalAdvance(label)
+        x = text_rect.left() + (text_rect.width() - text_width) / 2
+        y = text_rect.bottom() - metrics.descent()
+        path.addText(x, y, font, label)
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        outline_pen = QPen(QColor(255, 255, 255), 1.7)
+        outline_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.strokePath(path, outline_pen)
+        painter.fillPath(path, QColor(50, 50, 50))
 
     def _contains_path(self, image_path: str | Path) -> bool:
         path = Path(image_path)

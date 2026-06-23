@@ -33,6 +33,8 @@ class MixTab(QWidget):
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
+        margins = layout.contentsMargins()
+        layout.setContentsMargins(margins.left(), margins.top(), margins.right(), 0)
         source_channels = list(CHANNELS)
 
         for channel in CHANNELS:
