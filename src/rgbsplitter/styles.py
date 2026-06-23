@@ -161,6 +161,21 @@ QCheckBox {
 
 LABEL = "color: #c8c8c8"
 
+PROGRESS_BAR = """
+QProgressBar {
+    background-color: #333333;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    max-height: 8px;
+    min-height: 8px;
+}
+
+QProgressBar::chunk {
+    background-color: #8a8a8a;
+    border-radius: 2px;
+}
+"""
+
 
 def create_icon_button(icon_name: str, tooltip: str, callback) -> QPushButton:
     button = QPushButton()

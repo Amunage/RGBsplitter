@@ -1,6 +1,8 @@
+from collections.abc import Callable
+
+from PIL import Image
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QTabWidget, QVBoxLayout, QWidget
-from PIL import Image
 
 from . import styles
 from .resources import SMALL_ICON_PATH
@@ -48,15 +50,15 @@ class MainWindow(QMainWindow):
         self.preview_area.image_list_updated.connect(self.mix_tab.update_image_list)
         self.preview_area.image_list_updated.connect(self.merge_tab.update_image_list)
         self.preview_area.image_list_updated.connect(self.split_tab.update_image_list)
-        self.preview_area.set_hover_preview_provider(self._build_hover_preview_image)
+        self.preview_area.set_hover_preview_provider(self._build_hover_preview_job)
         self.tab_widget.currentChanged.connect(lambda *_: self.preview_area.refresh_hover_preview())
         self.mix_tab.preview_changed.connect(self.preview_area.refresh_hover_preview)
         self.merge_tab.preview_changed.connect(self.preview_area.refresh_hover_preview)
 
-    def _build_hover_preview_image(self) -> Image.Image | None:
+    def _build_hover_preview_job(self) -> Callable[[], Image.Image] | None:
         current_tab = self.tab_widget.currentWidget()
         if current_tab is self.mix_tab:
-            return self.mix_tab.build_preview_image()
+            return self.mix_tab.build_preview_job()
         if current_tab is self.merge_tab:
-            return self.merge_tab.build_preview_image()
+            return self.merge_tab.build_preview_job()
         return None

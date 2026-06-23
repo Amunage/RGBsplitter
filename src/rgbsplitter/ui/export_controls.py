@@ -1,5 +1,13 @@
 from PySide6.QtCore import QSettings, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QWidget,
+)
 
 from .. import styles
 from .controls import compact_combo_box
@@ -17,6 +25,8 @@ class ExportControls(QWidget):
         self._settings_group = settings_group
         self._settings = QSettings()
         self._has_saved_size = self._settings.contains(self._key("image_size"))
+        self._export_available = False
+        self._busy = False
         self._init_ui()
 
     @property
@@ -32,7 +42,18 @@ class ExportControls(QWidget):
         return self.keep_ratio_checkbox.isChecked()
 
     def set_export_enabled(self, enabled: bool) -> None:
-        self.export_button.setEnabled(enabled)
+        self._export_available = enabled
+        self._apply_enabled_state()
+
+    def set_busy(self, busy: bool, message: str = "") -> None:
+        self._busy = busy
+        self.progress_bar.setVisible(busy)
+        self.set_status(message)
+        self._apply_enabled_state()
+
+    def set_status(self, message: str = "") -> None:
+        self.status_label.setText(message)
+        self.status_label.setVisible(bool(message))
 
     def set_inferred_size(self, image_size: int) -> None:
         if self._has_saved_size:
@@ -65,12 +86,27 @@ class ExportControls(QWidget):
         self.export_button.setStyleSheet(styles.BUTTON)
         layout.addWidget(self.export_button)
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedWidth(54)
+        self.progress_bar.setStyleSheet(styles.PROGRESS_BAR)
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+
+        self.status_label = QLabel()
+        self.status_label.setFixedWidth(58)
+        self.status_label.setStyleSheet(styles.LABEL)
+        self.status_label.hide()
+        layout.addWidget(self.status_label)
+
         self.keep_ratio_checkbox.toggled.connect(self._save_keep_ratio)
-        self.keep_ratio_checkbox.toggled.connect(self.changed.emit)
+        self.keep_ratio_checkbox.toggled.connect(lambda *_: self.changed.emit())
         self.image_size_combo_box.currentTextChanged.connect(self._save_image_size)
-        self.image_size_combo_box.currentTextChanged.connect(self.changed.emit)
+        self.image_size_combo_box.currentTextChanged.connect(lambda *_: self.changed.emit())
         self.file_format_combo_box.currentTextChanged.connect(self._save_file_format)
         self.export_button.clicked.connect(self.export_requested.emit)
+        self._apply_enabled_state()
 
     def _settings_text(self, name: str, default: str, allowed_values: list[str]) -> str:
         value = str(self._settings.value(self._key(name), default))
@@ -96,3 +132,10 @@ class ExportControls(QWidget):
 
     def _key(self, name: str) -> str:
         return f"export/{self._settings_group}/{name}"
+
+    def _apply_enabled_state(self) -> None:
+        controls_enabled = not self._busy
+        self.keep_ratio_checkbox.setEnabled(controls_enabled)
+        self.image_size_combo_box.setEnabled(controls_enabled)
+        self.file_format_combo_box.setEnabled(controls_enabled)
+        self.export_button.setEnabled(self._export_available and not self._busy)

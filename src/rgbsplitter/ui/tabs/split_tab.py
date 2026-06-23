@@ -1,9 +1,11 @@
+from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ... import styles
 from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_item_entries
 from ..controls import compact_combo_box, current_combo_value, set_combo_entries
 from ..export_controls import ExportControls
+from ..workers import BackgroundTask
 
 
 class SplitTab(QWidget):
@@ -11,6 +13,7 @@ class SplitTab(QWidget):
         super().__init__(parent)
         self.image_paths = image_paths or []
         self.channel_widgets: dict[tuple[str, str], QComboBox | QLineEdit] = {}
+        self._export_task: BackgroundTask | None = None
         self._init_ui()
         self._set_export_enabled()
 
@@ -69,9 +72,33 @@ class SplitTab(QWidget):
         self._set_export_enabled()
 
     def export_image(self) -> None:
-        if not self.image_paths:
+        if not self.image_paths or self._export_task is not None:
             return
 
+        image_paths = self.image_paths.copy()
+        selections = self.current_selections()
+        image_size = self.export_controls.selected_size
+        output_name = self.name_input.text().strip()
+        file_format = self.export_controls.file_format
+        keep_aspect_ratio = self.export_controls.keep_aspect_ratio
+
+        task = BackgroundTask(
+            lambda: save_split_images(
+                image_paths=image_paths,
+                selections=selections,
+                image_size=image_size,
+                output_name=output_name,
+                file_format=file_format,
+                keep_aspect_ratio=keep_aspect_ratio,
+            )
+        )
+        task.signals.finished.connect(self._handle_export_finished)
+        task.signals.failed.connect(self._handle_export_failed)
+        self._export_task = task
+        self.export_controls.set_busy(True, "Saving...")
+        QThreadPool.globalInstance().start(task)
+
+    def current_selections(self) -> dict[str, SplitSelection]:
         selections = {}
         for channel in CHANNELS:
             image_combo = self.channel_widgets[(channel, "image")]
@@ -90,17 +117,7 @@ class SplitTab(QWidget):
                 suffix=suffix_input.text().strip(),
             )
 
-        output_paths = save_split_images(
-            image_paths=self.image_paths,
-            selections=selections,
-            image_size=self.export_controls.selected_size,
-            output_name=self.name_input.text().strip(),
-            file_format=self.export_controls.file_format,
-            keep_aspect_ratio=self.export_controls.keep_aspect_ratio,
-        )
-
-        for output_path in output_paths:
-            print(f"Image saved to {output_path}")
+        return selections
 
     def _update_image_size(self) -> None:
         size = str(infer_size_from_last_image(self.image_paths))
@@ -108,3 +125,17 @@ class SplitTab(QWidget):
 
     def _set_export_enabled(self) -> None:
         self.export_controls.set_export_enabled(bool(self.image_paths))
+
+    def _handle_export_finished(self, output_paths: object) -> None:
+        self._export_task = None
+        self.export_controls.set_busy(False)
+        self.export_controls.set_status("Saved")
+        if isinstance(output_paths, list):
+            for output_path in output_paths:
+                print(f"Image saved to {output_path}")
+
+    def _handle_export_failed(self, error: str) -> None:
+        self._export_task = None
+        self.export_controls.set_busy(False)
+        self.export_controls.set_status("Failed")
+        print(f"[ERROR] Export failed:\n{error}")

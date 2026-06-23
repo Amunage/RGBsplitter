@@ -1,5 +1,7 @@
+from collections.abc import Callable
+
 from PIL import Image
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QThreadPool, Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from ... import styles
@@ -15,6 +17,7 @@ from ...core.image_ops import (
 )
 from ..controls import compact_combo_box, current_combo_value, set_combo_entries
 from ..export_controls import ExportControls
+from ..workers import BackgroundTask
 
 
 class MergeTab(QWidget):
@@ -24,6 +27,7 @@ class MergeTab(QWidget):
         super().__init__(parent)
         self.image_paths = image_paths or []
         self.channel_widgets: dict[str, QComboBox] = {}
+        self._export_task: BackgroundTask | None = None
         self._init_ui()
         self._set_export_enabled()
 
@@ -74,23 +78,44 @@ class MergeTab(QWidget):
         self.preview_changed.emit()
 
     def export_image(self) -> None:
-        if not self.image_paths:
+        if not self.image_paths or self._export_task is not None:
             return
 
-        output_path = save_merge_image(
-            image_paths=self.image_paths,
-            selections=self.current_selections(),
-            image_size=self.current_output_size(),
-            output_name=self.name_input.text().strip(),
-            file_format=self.export_controls.file_format,
+        image_paths = self.image_paths.copy()
+        selections = self.current_selections()
+        image_size = self.current_output_size()
+        output_name = self.name_input.text().strip()
+        file_format = self.export_controls.file_format
+
+        task = BackgroundTask(
+            lambda: save_merge_image(
+                image_paths=image_paths,
+                selections=selections,
+                image_size=image_size,
+                output_name=output_name,
+                file_format=file_format,
+            )
         )
-        print(f"Image saved to {output_path}")
+        task.signals.finished.connect(self._handle_export_finished)
+        task.signals.failed.connect(self._handle_export_failed)
+        self._export_task = task
+        self.export_controls.set_busy(True, "Saving...")
+        QThreadPool.globalInstance().start(task)
 
     def build_preview_image(self) -> Image.Image | None:
         if not self.image_paths:
             return None
 
         return build_merge_image(self.image_paths, self.current_selections(), self.current_output_size(preview=True))
+
+    def build_preview_job(self) -> Callable[[], Image.Image] | None:
+        if not self.image_paths:
+            return None
+
+        image_paths = self.image_paths.copy()
+        selections = self.current_selections()
+        output_size = self.current_output_size(preview=True)
+        return lambda: build_merge_image(image_paths, selections, output_size)
 
     def current_selections(self) -> dict[str, MergeSelection]:
         return {
@@ -117,3 +142,15 @@ class MergeTab(QWidget):
 
     def _set_export_enabled(self) -> None:
         self.export_controls.set_export_enabled(bool(self.image_paths))
+
+    def _handle_export_finished(self, output_path: object) -> None:
+        self._export_task = None
+        self.export_controls.set_busy(False)
+        self.export_controls.set_status("Saved")
+        print(f"Image saved to {output_path}")
+
+    def _handle_export_failed(self, error: str) -> None:
+        self._export_task = None
+        self.export_controls.set_busy(False)
+        self.export_controls.set_status("Failed")
+        print(f"[ERROR] Export failed:\n{error}")

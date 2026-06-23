@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import Callable
 
 from PIL import Image
 from PIL.ImageQt import toqimage
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, QThreadPool, Qt, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import styles
 from ..core.image_ops import CachedImage, image_display_name, load_cached_image
 from .controls import compact_combo_box
+from .workers import BackgroundTask
+
+PreviewJob = Callable[[], Image.Image | None]
+PreviewJobProvider = Callable[[], PreviewJob | None]
 
 
 class PreviewArea(QWidget):
@@ -22,10 +27,12 @@ class PreviewArea(QWidget):
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.image_paths: list[CachedImage] = []
-        self._hover_preview_provider: Callable[[], Image.Image | None] | None = None
+        self._hover_preview_provider: PreviewJobProvider | None = None
         self._hover_preview_image: Image.Image | None = None
         self._is_hover_preview_visible = False
         self._is_pointer_in_image_area = False
+        self._preview_task_id = 0
+        self._preview_tasks: dict[int, BackgroundTask] = {}
         self._settings = QSettings()
         self._init_ui()
 
@@ -87,7 +94,7 @@ class PreviewArea(QWidget):
         main_layout.addLayout(sub_layout)
         self.setLayout(main_layout)
 
-    def set_hover_preview_provider(self, provider: Callable[[], Image.Image | None]) -> None:
+    def set_hover_preview_provider(self, provider: PreviewJobProvider) -> None:
         self._hover_preview_provider = provider
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
@@ -131,7 +138,7 @@ class PreviewArea(QWidget):
         self.image_list_updated.emit(self.image_paths.copy())
         self._update_combo_box_items()
         if self.pin_preview_checkbox.isChecked():
-            self.show_hover_preview()
+            self.show_hover_preview(force=True)
 
     def update_previews(self, index: int) -> None:
         if self._is_hover_preview_visible:
@@ -180,31 +187,45 @@ class PreviewArea(QWidget):
         for preview in self.previews:
             preview.show()
 
-    def show_hover_preview(self) -> None:
+    def show_hover_preview(self, force: bool = False) -> None:
         if self._hover_preview_provider is None:
+            return
+        if not force and self._is_hover_preview_visible and self._hover_preview_image is not None:
+            return
+        if not force and self._preview_task_id in self._preview_tasks:
             return
 
         try:
-            image = self._hover_preview_provider()
+            preview_job = self._hover_preview_provider()
         except OSError as error:
             print(f"[WARN] Hover preview unavailable: {error}")
             self.refresh_image_list()
             return
-        if image is None:
+        if preview_job is None:
             if self._is_hover_preview_visible:
                 self.clear_hover_preview()
             return
 
-        self._hover_preview_image = image.copy()
+        self._preview_task_id += 1
+        task_id = self._preview_task_id
         self._is_hover_preview_visible = True
-        self._set_hover_preview_image(self._hover_preview_image)
+        self._hover_preview_image = None
+        self._set_hover_preview_busy()
+
+        task = BackgroundTask(preview_job)
+        task.signals.finished.connect(partial(self._handle_hover_preview_finished, task_id))
+        task.signals.failed.connect(partial(self._handle_hover_preview_failed, task_id))
+        self._preview_tasks[task_id] = task
+        QThreadPool.globalInstance().start(task)
 
     def refresh_hover_preview(self) -> None:
         if self._is_hover_preview_visible or self.pin_preview_checkbox.isChecked():
-            self.show_hover_preview()
+            self.show_hover_preview(force=True)
 
     def clear_hover_preview(self) -> None:
-        if not self._is_hover_preview_visible:
+        self._preview_task_id += 1
+
+        if not self._is_hover_preview_visible and not self.hover_preview.isVisible():
             return
 
         self._is_hover_preview_visible = False
@@ -216,6 +237,7 @@ class PreviewArea(QWidget):
         self.update_previews(self.combo_box.currentIndex())
 
     def reset_image_list(self) -> None:
+        self._preview_task_id += 1
         self.image_paths.clear()
         self.combo_box.clear()
         self._hover_preview_image = None
@@ -240,7 +262,7 @@ class PreviewArea(QWidget):
         self._update_combo_box_items(next_index if next_index >= 0 else None)
 
         if self.pin_preview_checkbox.isChecked():
-            self.show_hover_preview()
+            self.show_hover_preview(force=True)
 
     def refresh_image_list(self) -> None:
         current_index = self.combo_box.currentIndex()
@@ -258,14 +280,16 @@ class PreviewArea(QWidget):
         selected_index = current_paths.index(current_path) if current_path in current_paths else None
         self._update_combo_box_items(selected_index)
         if self.pin_preview_checkbox.isChecked():
-            self.show_hover_preview()
+            self.show_hover_preview(force=True)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._is_hover_preview_visible and self._hover_preview_image is not None:
-            self._set_hover_preview_image(self._hover_preview_image)
-        else:
-            self.update_previews(self.combo_box.currentIndex())
+        if self._is_hover_preview_visible:
+            if self._hover_preview_image is not None:
+                self._set_hover_preview_image(self._hover_preview_image)
+            return
+
+        self.update_previews(self.combo_box.currentIndex())
 
     def _update_combo_box_items(self, selected_index: int | None = None) -> None:
         self.combo_box.clear()
@@ -301,11 +325,23 @@ class PreviewArea(QWidget):
             preview.clear()
             preview.hide()
 
+        self.hover_preview.setText("")
         self.hover_preview.setPixmap(scaled_pixmap)
+        self.hover_preview.show()
+
+    def _set_hover_preview_busy(self) -> None:
+        for preview in self.previews:
+            preview.clear()
+            preview.hide()
+
+        self.hover_preview.clear()
+        self.hover_preview.setStyleSheet(styles.LABEL)
+        self.hover_preview.setText("Rendering...")
         self.hover_preview.show()
 
     def _clear_channel_previews(self) -> None:
         self.hover_preview.clear()
+        self.hover_preview.setText("")
         self.hover_preview.hide()
         for preview in self.previews:
             preview.clear()
@@ -323,6 +359,31 @@ class PreviewArea(QWidget):
 
         if not self._is_pointer_in_image_area:
             self.clear_hover_preview()
+
+    def _handle_hover_preview_finished(self, task_id: int, image: object) -> None:
+        self._preview_tasks.pop(task_id, None)
+        if task_id != self._preview_task_id:
+            return
+        if not self._should_show_hover_preview():
+            return
+        if not isinstance(image, Image.Image):
+            self.clear_hover_preview()
+            return
+
+        self._hover_preview_image = image.copy()
+        self._is_hover_preview_visible = True
+        self._set_hover_preview_image(self._hover_preview_image)
+
+    def _handle_hover_preview_failed(self, task_id: int, error: str) -> None:
+        self._preview_tasks.pop(task_id, None)
+        if task_id != self._preview_task_id:
+            return
+
+        print(f"[WARN] Hover preview unavailable:\n{error}")
+        self.clear_hover_preview()
+
+    def _should_show_hover_preview(self) -> bool:
+        return self._is_pointer_in_image_area or self.pin_preview_checkbox.isChecked()
 
     def _settings_bool(self, key: str, default: bool) -> bool:
         value = self._settings.value(key, default)
