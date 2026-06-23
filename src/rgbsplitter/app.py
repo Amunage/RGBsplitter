@@ -1,9 +1,11 @@
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from .main_window import MainWindow
+from .ui.update_controller import UpdateController
 
 
 def apply_dark_palette(app: QApplication) -> None:
@@ -23,5 +25,7 @@ def main() -> int:
 
     main_window = MainWindow()
     main_window.show()
+    main_window.update_controller = UpdateController(main_window)
+    QTimer.singleShot(1200, main_window.update_controller.start)
 
     return app.exec()

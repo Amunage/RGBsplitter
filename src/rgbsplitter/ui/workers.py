@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 class WorkerSignals(QObject):
     finished = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, int)
 
 
 class BackgroundTask(QRunnable):
