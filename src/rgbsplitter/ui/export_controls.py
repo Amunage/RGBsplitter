@@ -1,6 +1,5 @@
 from PySide6.QtCore import QSettings, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QPushButton,
@@ -64,9 +63,11 @@ class ExportControls(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.keep_ratio_checkbox = QCheckBox("Keep Ratio")
-        self.keep_ratio_checkbox.setStyleSheet(styles.CHECKBOX)
-        self.keep_ratio_checkbox.setChecked(self._settings_bool("keep_ratio", False))
+        self.keep_ratio_checkbox = styles.create_toggle_icon_button(
+            "ratio",
+            "Keep Ratio",
+            self._settings_bool("keep_ratio", False),
+        )
         layout.addWidget(self.keep_ratio_checkbox)
 
         self.image_size_combo_box = compact_combo_box(QComboBox())

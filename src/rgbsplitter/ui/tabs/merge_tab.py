@@ -15,7 +15,7 @@ from ...core.image_ops import (
     resolve_output_size,
     save_merge_image,
 )
-from ..controls import compact_combo_box, current_combo_value, set_combo_entries
+from ..controls import compact_combo_box, current_combo_value, set_combo_entries, set_combo_entries_with_value
 from ..export_controls import ExportControls
 from ..workers import BackgroundTask
 
@@ -64,16 +64,22 @@ class MergeTab(QWidget):
         layout.addWidget(self.export_controls)
 
     def update_image_list(self, image_paths: list[ImageInput]) -> None:
+        had_images = bool(self.image_paths)
+        current_image_values = {
+            channel: current_combo_value(self.channel_widgets[channel])
+            for channel in CHANNELS
+        }
         self.image_paths = image_paths
         entries = channel_item_entries(self.image_paths)
         last_image_name = entries[-1][0]
+        initial_image_value = entries[-1][1] if self.image_paths else "None"
 
         self.name_input.setText(f"{last_image_name}_mix" if self.image_paths else "")
 
         for channel in CHANNELS:
             combo_box = self.channel_widgets[channel]
-            set_combo_entries(combo_box, entries)
-            combo_box.setCurrentIndex(len(entries) - 1 if self.image_paths else 0)
+            selected_value = initial_image_value if self.image_paths and not had_images else current_image_values[channel]
+            set_combo_entries_with_value(combo_box, entries, selected_value, "None")
 
         self._update_image_size()
         self._set_export_enabled()

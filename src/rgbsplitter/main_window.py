@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.mix_tab, "Mix")
         self.tab_widget.addTab(self.merge_tab, "Merge")
         self.tab_widget.addTab(self.split_tab, "Split")
+        main_layout.addSpacing(6)
         main_layout.addWidget(self.tab_widget)
 
         self.export_status_bar = ExportStatusBar()

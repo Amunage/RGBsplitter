@@ -2,6 +2,9 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QPushButton
 
+ICON_COLOR = QColor(170, 178, 186)
+TOGGLE_ICON_COLOR = QColor(99, 190, 255)
+
 
 TAB_WIDGET = """
 QTabWidget::pane {
@@ -9,7 +12,7 @@ QTabWidget::pane {
 }
 
 QTabWidget::tab-bar {
-    left: 5px;
+    alignment: center;
 }
 
 QTabBar::tab {
@@ -152,13 +155,6 @@ QPushButton:disabled {
 }
 """
 
-CHECKBOX = """
-QCheckBox {
-    color: #c8c8c8;
-    spacing: 4px;
-}
-"""
-
 LABEL = "color: #c8c8c8"
 
 PROGRESS_BAR = """
@@ -189,14 +185,31 @@ def create_icon_button(icon_name: str, tooltip: str, callback) -> QPushButton:
     return button
 
 
-def flat_icon(icon_name: str) -> QIcon:
+def create_toggle_icon_button(icon_name: str, tooltip: str, checked: bool = False) -> QPushButton:
+    button = QPushButton()
+    button.setCheckable(True)
+    button.setIconSize(QSize(16, 16))
+    button.setFixedSize(24, 22)
+    button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
+    button.setStyleSheet(ICON_BUTTON)
+    button.setChecked(checked)
+    button.setIcon(flat_icon(icon_name, TOGGLE_ICON_COLOR if checked else ICON_COLOR, checked))
+    button.toggled.connect(
+        lambda is_checked: button.setIcon(flat_icon(icon_name, TOGGLE_ICON_COLOR if is_checked else ICON_COLOR, is_checked))
+    )
+    return button
+
+
+def flat_icon(icon_name: str, color: QColor | None = None, checked: bool = False) -> QIcon:
     pixmap = QPixmap(16, 16)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    pen = QPen(QColor(170, 178, 186), 1.8)
+    icon_color = color or ICON_COLOR
+    pen = QPen(icon_color, 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -206,30 +219,82 @@ def flat_icon(icon_name: str) -> QIcon:
         painter.drawLine(5, 5, 11, 11)
         painter.drawLine(11, 5, 5, 11)
     elif icon_name == "reset":
-        _draw_reset_icon(painter)
+        _draw_reset_icon(painter, icon_color)
+    elif icon_name == "pin":
+        _draw_assembled_preview_icon(painter, checked)
+    elif icon_name == "channels":
+        _draw_placed_channels_icon(painter, icon_color, checked)
+    elif icon_name == "ratio":
+        _draw_ratio_icon(painter, checked)
     else:
-        _draw_refresh_icon(painter)
+        _draw_refresh_icon(painter, icon_color)
 
     painter.end()
     return QIcon(pixmap)
 
 
-def _draw_refresh_icon(painter: QPainter) -> None:
+def _draw_refresh_icon(painter: QPainter, color: QColor) -> None:
     painter.drawArc(QRectF(3.5, 2.8, 9.0, 9.0), 30 * 16, 145 * 16)
     painter.drawArc(QRectF(3.5, 4.2, 9.0, 9.0), 210 * 16, 145 * 16)
-    _draw_arrow_head(painter, QPointF(11.4, 3.2), QPointF(13.4, 4.0), QPointF(11.8, 5.8))
-    _draw_arrow_head(painter, QPointF(4.6, 12.8), QPointF(2.6, 12.0), QPointF(4.2, 10.2))
+    _draw_arrow_head(painter, QPointF(11.4, 3.2), QPointF(13.4, 4.0), QPointF(11.8, 5.8), color)
+    _draw_arrow_head(painter, QPointF(4.6, 12.8), QPointF(2.6, 12.0), QPointF(4.2, 10.2), color)
 
 
-def _draw_reset_icon(painter: QPainter) -> None:
+def _draw_reset_icon(painter: QPainter, color: QColor) -> None:
     painter.drawArc(QRectF(3.0, 3.0, 10.0, 10.0), 135 * 16, 305 * 16)
-    _draw_arrow_head(painter, QPointF(4.4, 5.0), QPointF(3.0, 2.8), QPointF(6.0, 3.2))
+    _draw_arrow_head(painter, QPointF(4.4, 5.0), QPointF(3.0, 2.8), QPointF(6.0, 3.2), color)
 
 
-def _draw_arrow_head(painter: QPainter, a: QPointF, b: QPointF, c: QPointF) -> None:
+def _draw_assembled_preview_icon(painter: QPainter, checked: bool) -> None:
+    if checked:
+        painter.drawRoundedRect(QRectF(4.2, 4.2, 7.6, 7.6), 0.9, 0.9)
+        return
+
+    for x in (3.2, 8.8):
+        for y in (3.2, 8.8):
+            painter.drawRoundedRect(QRectF(x, y, 4.0, 4.0), 0.7, 0.7)
+
+
+def _draw_placed_channels_icon(painter: QPainter, color: QColor, checked: bool) -> None:
+    path = QPainterPath()
+    if checked:
+        path.moveTo(3.6, 5.0)
+        path.lineTo(12.4, 5.0)
+        path.lineTo(8.0, 12.0)
+        path.closeSubpath()
+        painter.fillPath(path, color)
+        return
+
+    path.moveTo(8.0, 3.8)
+    path.lineTo(12.2, 11.4)
+    path.lineTo(3.8, 11.4)
+    path.closeSubpath()
+    painter.drawPath(path)
+
+
+def _draw_ratio_icon(painter: QPainter, checked: bool) -> None:
+    if checked:
+        _draw_corner_box_icon(painter, 4.1, 4.1, 11.9, 11.9, 2.3)
+        return
+
+    _draw_corner_box_icon(painter, 3.4, 4.0, 12.6, 12.0, 2.9)
+
+
+def _draw_corner_box_icon(painter: QPainter, left: float, top: float, right: float, bottom: float, arm: float) -> None:
+    painter.drawLine(QPointF(left, top), QPointF(left + arm, top))
+    painter.drawLine(QPointF(left, top), QPointF(left, top + arm))
+    painter.drawLine(QPointF(right, top), QPointF(right - arm, top))
+    painter.drawLine(QPointF(right, top), QPointF(right, top + arm))
+    painter.drawLine(QPointF(left, bottom), QPointF(left + arm, bottom))
+    painter.drawLine(QPointF(left, bottom), QPointF(left, bottom - arm))
+    painter.drawLine(QPointF(right, bottom), QPointF(right - arm, bottom))
+    painter.drawLine(QPointF(right, bottom), QPointF(right, bottom - arm))
+
+
+def _draw_arrow_head(painter: QPainter, a: QPointF, b: QPointF, c: QPointF, color: QColor) -> None:
     path = QPainterPath()
     path.moveTo(a)
     path.lineTo(b)
     path.lineTo(c)
     path.closeSubpath()
-    painter.fillPath(path, QColor(170, 178, 186))
+    painter.fillPath(path, color)

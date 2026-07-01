@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -19,7 +20,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import styles
 from ..core.image_ops import CachedImage, image_display_name, load_cached_image
@@ -71,11 +72,18 @@ class PreviewArea(QWidget):
         self.combo_box = compact_combo_box(QComboBox())
         self.combo_box.currentIndexChanged.connect(self.update_previews)
 
-        self.pin_preview_checkbox = QCheckBox()
-        self.pin_preview_checkbox.setFixedWidth(20)
-        self.pin_preview_checkbox.setToolTip("Pin assembled preview")
-        self.pin_preview_checkbox.setStyleSheet(styles.CHECKBOX)
-        self.pin_preview_checkbox.setChecked(self._settings_bool("preview/pin_assembled", False))
+        self.placed_channels_checkbox = styles.create_toggle_icon_button(
+            "channels",
+            "Show placed image channels",
+            self._settings_bool("preview/show_placed_channels", False),
+        )
+        self.placed_channels_checkbox.toggled.connect(self._handle_placed_channels_toggled)
+
+        self.pin_preview_checkbox = styles.create_toggle_icon_button(
+            "pin",
+            "Pin assembled preview",
+            self._settings_bool("preview/pin_assembled", False),
+        )
         self.pin_preview_checkbox.toggled.connect(self._handle_pin_preview_toggled)
 
         self.remove_button = styles.create_icon_button(
@@ -95,6 +103,7 @@ class PreviewArea(QWidget):
         )
 
         sub_layout = QHBoxLayout()
+        sub_layout.addWidget(self.placed_channels_checkbox)
         sub_layout.addWidget(self.pin_preview_checkbox)
         sub_layout.addWidget(self.combo_box)
         sub_layout.addWidget(self.remove_button)
@@ -134,6 +143,9 @@ class PreviewArea(QWidget):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        current_index = self.combo_box.currentIndex()
+        current_path = self.image_paths[current_index].path if 0 <= current_index < len(self.image_paths) else None
+
         for url in event.mimeData().urls():
             if not url.isLocalFile():
                 continue
@@ -147,23 +159,30 @@ class PreviewArea(QWidget):
                 self.image_paths.append(cached_image)
 
         self.image_list_updated.emit(self.image_paths.copy())
-        self._update_combo_box_items()
+        current_paths = [cached_image.path for cached_image in self.image_paths]
+        selected_index = current_paths.index(current_path) if current_path in current_paths else None
+        self._update_combo_box_items(selected_index)
         if self.pin_preview_checkbox.isChecked():
             self.show_hover_preview(force=True)
 
     def update_previews(self, index: int) -> None:
         if self._is_hover_preview_visible:
+            if not self.placed_channels_checkbox.isChecked():
+                self.show_hover_preview(force=True)
             return
 
-        if index < 0 or index >= len(self.image_paths):
+        image = self._channel_preview_image(index)
+        if image is None:
+            self._clear_channel_previews()
             return
 
+        self._set_channel_previews(image)
+
+    def _set_channel_previews(self, image: Image.Image) -> None:
         max_width = max(1, self.width() // 2 - 10)
         max_height = max(1, self.height() // 2 - 10)
         labels = ("R", "G", "B", "A")
-
-        cached_image = self.image_paths[index]
-        channels = cached_image.image.convert("RGBA").split()
+        channels = image.convert("RGBA").split()
 
         for channel_index, channel in enumerate(channels):
             qt_image = toqimage(channel)
@@ -190,15 +209,13 @@ class PreviewArea(QWidget):
             preview.show()
 
     def show_hover_preview(self, force: bool = False) -> None:
-        if self._hover_preview_provider is None:
-            return
         if not force and self._is_hover_preview_visible and self._hover_preview_image is not None:
             return
         if not force and self._preview_task_id in self._preview_tasks:
             return
 
         try:
-            preview_job = self._hover_preview_provider()
+            preview_job = self._current_hover_preview_job()
         except OSError as error:
             print(f"[WARN] Hover preview unavailable: {error}")
             self.refresh_image_list()
@@ -223,6 +240,8 @@ class PreviewArea(QWidget):
     def refresh_hover_preview(self) -> None:
         if self._is_hover_preview_visible or self.pin_preview_checkbox.isChecked():
             self.show_hover_preview(force=True)
+        elif self.placed_channels_checkbox.isChecked():
+            self.update_previews(self.combo_box.currentIndex())
 
     def clear_hover_preview(self) -> None:
         self._preview_task_id += 1
@@ -245,6 +264,7 @@ class PreviewArea(QWidget):
         self._hover_preview_image = None
         self._is_hover_preview_visible = False
         self._is_pointer_in_image_area = False
+        self.placed_channels_checkbox.setChecked(False)
         self.pin_preview_checkbox.setChecked(False)
         self.hover_preview.clear()
         self.hover_preview.hide()
@@ -304,6 +324,54 @@ class PreviewArea(QWidget):
             self.update_previews(index)
         else:
             self._clear_channel_previews()
+
+    def _channel_preview_image(self, index: int) -> Image.Image | None:
+        if self.placed_channels_checkbox.isChecked():
+            return self._build_placed_channel_preview_image()
+
+        if index < 0 or index >= len(self.image_paths):
+            return None
+
+        return self.image_paths[index].image
+
+    def _build_placed_channel_preview_image(self) -> Image.Image | None:
+        try:
+            preview_job = self._placed_preview_job()
+            if preview_job is None:
+                return None
+            image = preview_job()
+        except OSError as error:
+            print(f"[WARN] Placed channel preview unavailable: {error}")
+            self.refresh_image_list()
+            return None
+        except Exception:
+            print(f"[WARN] Placed channel preview unavailable:\n{traceback.format_exc()}")
+            return None
+
+        if not isinstance(image, Image.Image):
+            return None
+
+        return image
+
+    def _current_hover_preview_job(self) -> PreviewJob | None:
+        if self.placed_channels_checkbox.isChecked():
+            return self._placed_preview_job()
+
+        return self._selected_image_preview_job()
+
+    def _placed_preview_job(self) -> PreviewJob | None:
+        if self._hover_preview_provider is None:
+            return None
+
+        return self._hover_preview_provider()
+
+    def _selected_image_preview_job(self) -> PreviewJob | None:
+        index = self.combo_box.currentIndex()
+        if index < 0 or index >= len(self.image_paths):
+            return None
+
+        image = self.image_paths[index].image.copy()
+        return lambda: image.copy()
 
     def _set_hover_preview_image(self, image: Image.Image) -> None:
         available_rect = self.grid_layout.geometry()
@@ -379,6 +447,14 @@ class PreviewArea(QWidget):
 
         if not self._is_pointer_in_image_area:
             self.clear_hover_preview()
+
+    def _handle_placed_channels_toggled(self, checked: bool) -> None:
+        self._settings.setValue("preview/show_placed_channels", checked)
+        if self._is_hover_preview_visible or self.pin_preview_checkbox.isChecked():
+            self.show_hover_preview(force=True)
+            return
+
+        self.update_previews(self.combo_box.currentIndex())
 
     def _handle_hover_preview_finished(self, task_id: int, image: object) -> None:
         self._preview_tasks.pop(task_id, None)

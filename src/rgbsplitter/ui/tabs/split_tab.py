@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QVBoxLayout, QW
 
 from ... import styles
 from ...core.image_ops import CHANNELS, ImageInput, SplitSelection, infer_size_from_last_image, save_split_images, split_item_entries
-from ..controls import compact_combo_box, current_combo_value, set_combo_entries
+from ..controls import compact_combo_box, current_combo_value, set_combo_entries, set_combo_entries_with_value
 from ..export_controls import ExportControls
 from ..workers import BackgroundTask
 
@@ -58,17 +58,25 @@ class SplitTab(QWidget):
         layout.addWidget(self.export_controls)
 
     def update_image_list(self, image_paths: list[ImageInput]) -> None:
+        had_images = bool(self.image_paths)
+        current_image_values = {}
+        for channel in CHANNELS:
+            combo_box = self.channel_widgets[(channel, "image")]
+            if isinstance(combo_box, QComboBox):
+                current_image_values[channel] = current_combo_value(combo_box)
+
         self.image_paths = image_paths
         entries = split_item_entries(self.image_paths)
         last_image_name = entries[-1][0]
+        initial_image_value = entries[-1][1] if self.image_paths else entries[0][1]
 
         self.name_input.setText(last_image_name if self.image_paths else "")
 
         for channel in CHANNELS:
             combo_box = self.channel_widgets[(channel, "image")]
             if isinstance(combo_box, QComboBox):
-                set_combo_entries(combo_box, entries)
-                combo_box.setCurrentIndex(len(entries) - 1 if self.image_paths else 0)
+                selected_value = initial_image_value if self.image_paths and not had_images else current_image_values[channel]
+                set_combo_entries_with_value(combo_box, entries, selected_value, entries[0][1])
 
         self._update_image_size()
         self._set_export_enabled()

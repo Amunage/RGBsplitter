@@ -22,6 +22,22 @@ def set_combo_entries(combo_box: QComboBox, entries: list[tuple[str, str]]) -> N
         combo_box.addItem(display_text, value)
 
 
+def set_combo_entries_with_value(
+    combo_box: QComboBox,
+    entries: list[tuple[str, str]],
+    selected_value: str,
+    fallback_value: str,
+) -> None:
+    set_combo_entries(combo_box, entries)
+    for value in (selected_value, fallback_value):
+        index = combo_box.findData(value)
+        if index < 0:
+            index = combo_box.findText(value)
+        if index >= 0:
+            combo_box.setCurrentIndex(index)
+            return
+
+
 def current_combo_value(combo_box: QComboBox) -> str:
     value = combo_box.currentData()
     if value is None:

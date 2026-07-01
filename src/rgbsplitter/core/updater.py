@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from packaging.version import Version
@@ -20,6 +22,7 @@ from ..version import __version__
 GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/Amunage/RGBsplitter/releases/latest"
 USER_AGENT = f"RGBsplitter-updater/{__version__}"
 VERSION_TAG_PATTERN = re.compile(r"^[vV]?\d+\.\d+\.\d+$")
+LAST_EXE_RELEASE_VERSION = Version("1.0.2")
 
 
 @dataclass(frozen=True)
@@ -79,20 +82,7 @@ def release_info_from_payload(payload: Mapping[str, Any]) -> ReleaseInfo:
     if not isinstance(assets, list):
         raise UpdateError("Invalid GitHub release payload.", "The release payload does not contain an assets list.")
 
-    exe_assets = [
-        asset
-        for asset in assets
-        if isinstance(asset, Mapping)
-        and str(asset.get("name", "")).lower().endswith(".exe")
-        and str(asset.get("browser_download_url", "")).strip()
-    ]
-    if len(exe_assets) != 1:
-        raise UpdateError(
-            "Invalid GitHub release assets.",
-            f"Expected exactly one .exe asset, but found {len(exe_assets)}.",
-        )
-
-    asset = exe_assets[0]
+    asset = _select_release_asset(assets, version)
     asset_name = str(asset.get("name", "")).strip()
     download_url = str(asset.get("browser_download_url", "")).strip()
     try:
@@ -162,20 +152,59 @@ def download_update(
         raise UpdateError("Failed to download update.", repr(error)) from error
 
     partial_destination.replace(destination)
-    validate_downloaded_exe(destination, release_info.size)
+    _validate_downloaded_file_size(destination, release_info.size)
+    if _is_zip_release_asset(release_info):
+        return extract_update_exe_from_zip(destination)
+
+    _validate_exe_header(destination)
     return destination
 
 
 def validate_downloaded_exe(exe_path: Path, expected_size: int) -> None:
-    if not exe_path.is_file():
-        raise UpdateError("Downloaded update file is missing.", str(exe_path))
+    _validate_downloaded_file_size(exe_path, expected_size)
+    _validate_exe_header(exe_path)
 
-    actual_size = exe_path.stat().st_size
+
+def extract_update_exe_from_zip(zip_path: Path) -> Path:
+    if not zip_path.is_file():
+        raise UpdateError("Downloaded update file is missing.", str(zip_path))
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            exe_members = [info for info in archive.infolist() if _is_top_level_exe_member(info)]
+            if len(exe_members) != 1:
+                raise UpdateError(
+                    "Invalid update zip.",
+                    f"Expected exactly one top-level .exe file, but found {len(exe_members)}.",
+                )
+
+            extracted_path = zip_path.with_suffix(".exe")
+            with archive.open(exe_members[0]) as source, extracted_path.open("wb") as output_file:
+                shutil.copyfileobj(source, output_file)
+    except zipfile.BadZipFile as error:
+        raise UpdateError("Downloaded update is not a valid zip file.", repr(error)) from error
+    except OSError as error:
+        raise UpdateError("Failed to extract update zip.", repr(error)) from error
+
+    _validate_exe_header(extracted_path)
+    return extracted_path
+
+
+def _validate_downloaded_file_size(file_path: Path, expected_size: int) -> None:
+    if not file_path.is_file():
+        raise UpdateError("Downloaded update file is missing.", str(file_path))
+
+    actual_size = file_path.stat().st_size
     if actual_size != expected_size:
         raise UpdateError(
             "Downloaded update file size does not match.",
             f"Expected {expected_size} bytes, got {actual_size} bytes.",
         )
+
+
+def _validate_exe_header(exe_path: Path) -> None:
+    if not exe_path.is_file():
+        raise UpdateError("Downloaded update file is missing.", str(exe_path))
 
     with exe_path.open("rb") as file:
         signature = file.read(2)
@@ -185,7 +214,8 @@ def validate_downloaded_exe(exe_path: Path, expected_size: int) -> None:
 
 def default_update_download_path(release_info: ReleaseInfo) -> Path:
     local_app_data = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
-    return local_app_data / "RGBsplitter" / "updates" / f"RGB Splitter-{release_info.version}.exe"
+    suffix = ".zip" if _is_zip_release_asset(release_info) else ".exe"
+    return local_app_data / "RGBsplitter" / "updates" / f"RGB Splitter-{release_info.version}{suffix}"
 
 
 def preflight_update_target(target_exe: Path) -> None:
@@ -294,6 +324,47 @@ def _read_json_url(url: str, timeout: float) -> Mapping[str, Any]:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _select_release_asset(assets: list, version: Version) -> Mapping[str, Any]:
+    if version <= LAST_EXE_RELEASE_VERSION:
+        exe_assets = _release_assets_with_suffix(assets, ".exe")
+        if len(exe_assets) != 1:
+            raise UpdateError(
+                "Invalid GitHub release assets.",
+                f"Expected exactly one .exe asset, but found {len(exe_assets)}.",
+            )
+        return exe_assets[0]
+
+    zip_assets = _release_assets_with_suffix(assets, ".zip")
+    if not zip_assets:
+        raise UpdateError("Invalid GitHub release assets.", "Expected at least one .zip asset, but found 0.")
+    return zip_assets[0]
+
+
+def _release_assets_with_suffix(assets: list, suffix: str) -> list[Mapping[str, Any]]:
+    return [
+        asset
+        for asset in assets
+        if isinstance(asset, Mapping)
+        and str(asset.get("name", "")).lower().endswith(suffix)
+        and str(asset.get("browser_download_url", "")).strip()
+    ]
+
+
+def _is_zip_release_asset(release_info: ReleaseInfo) -> bool:
+    return release_info.asset_name.lower().endswith(".zip")
+
+
+def _is_top_level_exe_member(member: zipfile.ZipInfo) -> bool:
+    if member.is_dir():
+        return False
+
+    filename = member.filename
+    if not filename or filename.startswith(("/", "\\")) or "/" in filename or "\\" in filename:
+        return False
+
+    return PurePosixPath(filename).suffix.lower() == ".exe"
 
 
 def _powershell_quote(value: str) -> str:
