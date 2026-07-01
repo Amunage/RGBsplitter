@@ -143,9 +143,6 @@ class PreviewArea(QWidget):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        current_index = self.combo_box.currentIndex()
-        current_path = self.image_paths[current_index].path if 0 <= current_index < len(self.image_paths) else None
-
         for url in event.mimeData().urls():
             if not url.isLocalFile():
                 continue
@@ -159,9 +156,7 @@ class PreviewArea(QWidget):
                 self.image_paths.append(cached_image)
 
         self.image_list_updated.emit(self.image_paths.copy())
-        current_paths = [cached_image.path for cached_image in self.image_paths]
-        selected_index = current_paths.index(current_path) if current_path in current_paths else None
-        self._update_combo_box_items(selected_index)
+        self._update_combo_box_items()
         if self.pin_preview_checkbox.isChecked():
             self.show_hover_preview(force=True)
 
